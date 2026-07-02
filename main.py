@@ -40,10 +40,10 @@ YDL_OPTS = {
     # Prefer m4a/opus audio-only streams over full video+audio muxes.
     "extractor_args": {
         "youtube": {
-            # "android" and "ios" clients are less likely to trigger
-            # YouTube's "sign in to confirm you're not a bot" check
-            # than "web", especially from datacenter IPs (like Render's).
-            "player_client": ["android", "ios"],
+            # Try android/ios first (less likely to trigger bot-check),
+            # fall back to web if a video reports "unavailable" on
+            # mobile clients (happens for some region/age-related cases).
+            "player_client": ["android", "ios", "web"],
         }
     },
 }
