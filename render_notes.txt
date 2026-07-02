@@ -1,0 +1,7 @@
+# Render.com deploy settings (for reference - also set these directly
+# in the Render dashboard when creating the Web Service):
+#
+# Build Command: pip install -r requirements.txt
+# Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
+#
+# Render injects $PORT automatically - don't hardcode 8000 in production.
