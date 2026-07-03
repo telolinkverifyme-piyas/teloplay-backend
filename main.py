@@ -56,12 +56,39 @@ def health():
     return {"status": "ok"}
 
 
+def classify_error(raw_message: str) -> tuple[str, str]:
+    """
+    Maps a raw yt-dlp error message to a stable error code + a short
+    user-facing reason. The Flutter app should switch on `code`, not
+    on the raw message text (which can change between yt-dlp versions
+    and isn't meant for display).
+
+    Returns: (code, reason)
+    """
+    msg = raw_message.lower()
+
+    if "sign in to confirm" in msg or "not a bot" in msg:
+        return "BOT_CHECK", "YouTube temporarily blocked this request"
+    if "video unavailable" in msg:
+        return "UNAVAILABLE", "This video is unavailable"
+    if "private video" in msg:
+        return "PRIVATE", "This video is private"
+    if "age" in msg and ("restrict" in msg or "confirm" in msg):
+        return "AGE_RESTRICTED", "This video is age-restricted"
+    if "region" in msg or "not available in your country" in msg:
+        return "REGION_BLOCKED", "This video isn't available in this region"
+    if "copyright" in msg:
+        return "COPYRIGHT", "This video was blocked due to a copyright claim"
+
+    return "UNKNOWN", "Could not resolve this stream"
+
+
 @app.get("/stream/{video_id}")
 def get_stream(video_id: str):
     """
     Resolves a playable audio stream URL for the given YouTube video ID.
 
-    Returns:
+    Success response:
         {
             "videoId": str,
             "title": str,
@@ -70,6 +97,16 @@ def get_stream(video_id: str):
             "abr": float | None, # audio bitrate (kbps)
             "duration": int | None
         }
+
+    Error response (raised as HTTPException, status 404 or 502):
+        {
+            "detail": {
+                "code": str,       # stable machine-readable code, e.g. "BOT_CHECK"
+                "reason": str,     # short human-readable reason
+                "videoId": str,
+                "retryable": bool  # true if trying again might succeed
+            }
+        }
     """
     url = f"https://www.youtube.com/watch?v={video_id}"
 
@@ -77,16 +114,34 @@ def get_stream(video_id: str):
         with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
             info = ydl.extract_info(url, download=False)
     except yt_dlp.utils.DownloadError as e:
+        code, reason = classify_error(str(e))
+        # BOT_CHECK (and genuinely unknown errors) are known to be
+        # inconsistent (roadmap bug #8) - the same video sometimes
+        # succeeds on a later attempt, so we mark them retryable.
+        # Permanent states (unavailable/private/region/copyright) are not.
+        retryable = code in ("BOT_CHECK", "UNKNOWN")
+        status_code = 404 if code in ("UNAVAILABLE", "PRIVATE") else 502
+
         raise HTTPException(
-            status_code=502,
-            detail=f"Could not resolve stream: {str(e)}",
+            status_code=status_code,
+            detail={
+                "code": code,
+                "reason": reason,
+                "videoId": video_id,
+                "retryable": retryable,
+            },
         )
 
     stream_url = info.get("url")
     if not stream_url:
         raise HTTPException(
             status_code=502,
-            detail="yt-dlp did not return a direct URL for this video",
+            detail={
+                "code": "NO_STREAM_URL",
+                "reason": "Resolved the video but got no playable URL",
+                "videoId": video_id,
+                "retryable": True,
+            },
         )
 
     return {
