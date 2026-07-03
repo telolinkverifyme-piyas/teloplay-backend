@@ -49,12 +49,11 @@ COOKIES_PATH = "/etc/secrets/cookies.txt"
 # speeds up repeated calls.
 YDL_OPTS = {
     # "bestaudio/best" alone can fail with "Requested format is not
-    # available" once cookies are attached - a logged-in session can
-    # return a different/narrower format list per player_client than
-    # an anonymous one. The trailing bare "/" with no filter is the
-    # true last resort: it accepts whatever single format yt-dlp finds,
-    # audio+video combined if that's all that's offered, rather than
-    # erroring out. We only serve audio anyway (see get_stream), so a
+    # available" once cookies are attached - see the player_client
+    # comment below for the real reason. The trailing bare fallbacks
+    # ("worstaudio/worst") are the true last resort: they accept
+    # whatever single format yt-dlp finds if nothing audio-only is
+    # offered. We only serve audio anyway (see get_stream), so a
     # combined format still works, just slightly less bandwidth-efficient.
     "format": "bestaudio/best/bestaudio*/best*/worstaudio/worst",
     "quiet": True,
@@ -66,20 +65,36 @@ YDL_OPTS = {
     # IP are a common trigger). This adds a little latency per stream
     # resolve but is low-risk and doesn't need any external service.
     "sleep_interval_requests": 1,
-    # Prefer m4a/opus audio-only streams over full video+audio muxes.
     "extractor_args": {
         "youtube": {
-            # Client order matters here and interacts with cookies:
-            # - Without cookies: android/ios first (less likely to
-            #   trigger bot-check on an anonymous datacenter IP).
-            # - With cookies: a logged-in session is inherently a "web"
-            #   browser session, so "web" first uses the cookies as
-            #   intended and avoids the format-list mismatches seen
-            #   when mobile clients try to use a web-session cookiejar
-            #   (see roadmap bug #8 - "format not available" errors
-            #   appeared specifically after cookies were added).
+            # Client order - CHANGED (bug #8 fix):
+            #
+            # Once a logged-in cookie session is attached, YouTube now
+            # requires the "web" and "web_safari" clients to bind a GVS
+            # PO Token to the video ID before they'll return real stream
+            # URLs. Without a PO token provider (e.g. bgutil - not yet
+            # implemented, see roadmap Phase 1 bug log), those clients
+            # get their https formats stripped entirely ("YouTube is
+            # forcing SABR streaming for this client") and only image
+            # formats survive. That leaves yt-dlp with nothing to match
+            # against "bestaudio/best/...", so EVERY video fails with
+            # "Requested format is not available" - not just some.
+            #
+            # This is why cookies previously caused a hard regression
+            # (even dQw4w9WgXcQ started failing): putting "web" first
+            # made every request hit the PO-token-gated path.
+            #
+            # Fix: never use web/web_safari when cookies are present.
+            # android/ios clients don't hit this same GVS PO Token bind
+            # requirement, so they still return real, playable formats
+            # with a cookie session attached.
+            #
+            # If android/ios ALSO start showing "SABR"/PO token warnings
+            # in the future, that's the signal we finally need the
+            # bgutil PO token provider - cookies alone won't be enough
+            # anymore at that point.
             "player_client": (
-                ["web", "android", "ios"]
+                ["android", "ios"]
                 if os.path.exists(COOKIES_PATH)
                 else ["android", "ios", "web"]
             ),
@@ -94,11 +109,11 @@ YDL_OPTS = {
 # IMPORTANT: Render's "Secret Files" are mounted read-only. yt-dlp
 # normally tries to write the cookiejar back to disk when it closes
 # (to persist any session updates), which crashes with "Read-only
-# file system" on Render. cookiesfrombrowser aside, the fix is to
-# copy the cookies into a writable temp location and point yt-dlp
-# there instead - yt-dlp can freely read/write it, and we don't care
-# if it's discarded when the container restarts (we just re-copy the
-# original secret file each startup).
+# file system" on Render. The fix is to copy the cookies into a
+# writable temp location and point yt-dlp there instead - yt-dlp can
+# freely read/write it, and we don't care if it's discarded when the
+# container restarts (we just re-copy the original secret file each
+# startup).
 if os.path.exists(COOKIES_PATH):
     import shutil
     import tempfile
@@ -130,14 +145,24 @@ def health():
     """Used by the keep-alive cron job (cron-job.org) to prevent
     Render's free tier from spinning the service down.
 
-    Also reports cookies status - if bot-detection errors (BOT_CHECK)
+    Also reports cookies status and which player_client list is
+    active - if bot-detection errors (BOT_CHECK) or format errors
     start happening often, check this endpoint first:
       - cookies_loaded: false          -> secret file missing/misnamed
       - cookies_age_days: large number -> cookies may have expired,
                                            time to re-export (see COOKIES_PATH
                                            comment above for steps)
+      - player_client: should be ["android", "ios"] whenever
+                        cookies_loaded is true (see bug #8 - if this
+                        ever shows "web" first while cookies are
+                        loaded, that combination is known to break
+                        format resolution on every video)
     """
-    return {"status": "ok", **cookies_status()}
+    return {
+        "status": "ok",
+        **cookies_status(),
+        "player_client": YDL_OPTS["extractor_args"]["youtube"]["player_client"],
+    }
 
 
 def classify_error(raw_message: str) -> tuple[str, str]:
@@ -155,6 +180,8 @@ def classify_error(raw_message: str) -> tuple[str, str]:
         return "BOT_CHECK", "YouTube temporarily blocked this request"
     if "cookies are no longer valid" in msg or "failed to load cookies" in msg:
         return "COOKIES_EXPIRED", "The server's YouTube session expired"
+    if "requested format is not available" in msg:
+        return "FORMAT_UNAVAILABLE", "No playable stream was found for this video"
     if "video unavailable" in msg:
         return "UNAVAILABLE", "This video is unavailable"
     if "private video" in msg:
@@ -201,11 +228,12 @@ def get_stream(video_id: str):
             info = ydl.extract_info(url, download=False)
     except yt_dlp.utils.DownloadError as e:
         code, reason = classify_error(str(e))
-        # BOT_CHECK (and genuinely unknown errors) are known to be
-        # inconsistent (roadmap bug #8) - the same video sometimes
-        # succeeds on a later attempt, so we mark them retryable.
-        # Permanent states (unavailable/private/region/copyright) are not.
-        retryable = code in ("BOT_CHECK", "UNKNOWN")
+        # BOT_CHECK, FORMAT_UNAVAILABLE, and genuinely unknown errors
+        # are known to be inconsistent (roadmap bug #8) - the same
+        # video sometimes succeeds on a later attempt or after a
+        # player_client change, so we mark them retryable. Permanent
+        # states (unavailable/private/region/copyright) are not.
+        retryable = code in ("BOT_CHECK", "FORMAT_UNAVAILABLE", "UNKNOWN")
         status_code = 404 if code in ("UNAVAILABLE", "PRIVATE") else 502
 
         raise HTTPException(
