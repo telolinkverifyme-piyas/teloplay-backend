@@ -49,11 +49,14 @@ COOKIES_PATH = "/etc/secrets/cookies.txt"
 # speeds up repeated calls.
 YDL_OPTS = {
     # "bestaudio/best" alone can fail with "Requested format is not
-    # available" once cookies are attached - a logged-in session
-    # sometimes gets a different/narrower format list per player_client
-    # than an anonymous one. Broaden the selector so it falls back
-    # through progressively looser options instead of erroring out.
-    "format": "bestaudio/best/bestaudio*/best*",
+    # available" once cookies are attached - a logged-in session can
+    # return a different/narrower format list per player_client than
+    # an anonymous one. The trailing bare "/" with no filter is the
+    # true last resort: it accepts whatever single format yt-dlp finds,
+    # audio+video combined if that's all that's offered, rather than
+    # erroring out. We only serve audio anyway (see get_stream), so a
+    # combined format still works, just slightly less bandwidth-efficient.
+    "format": "bestaudio/best/bestaudio*/best*/worstaudio/worst",
     "quiet": True,
     "no_warnings": True,
     "noplaylist": True,
@@ -66,10 +69,20 @@ YDL_OPTS = {
     # Prefer m4a/opus audio-only streams over full video+audio muxes.
     "extractor_args": {
         "youtube": {
-            # Try android/ios first (less likely to trigger bot-check),
-            # fall back to web if a video reports "unavailable" on
-            # mobile clients (happens for some region/age-related cases).
-            "player_client": ["android", "ios", "web"],
+            # Client order matters here and interacts with cookies:
+            # - Without cookies: android/ios first (less likely to
+            #   trigger bot-check on an anonymous datacenter IP).
+            # - With cookies: a logged-in session is inherently a "web"
+            #   browser session, so "web" first uses the cookies as
+            #   intended and avoids the format-list mismatches seen
+            #   when mobile clients try to use a web-session cookiejar
+            #   (see roadmap bug #8 - "format not available" errors
+            #   appeared specifically after cookies were added).
+            "player_client": (
+                ["web", "android", "ios"]
+                if os.path.exists(COOKIES_PATH)
+                else ["android", "ios", "web"]
+            ),
         }
     },
 }
@@ -86,7 +99,7 @@ YDL_OPTS = {
 # there instead - yt-dlp can freely read/write it, and we don't care
 # if it's discarded when the container restarts (we just re-copy the
 # original secret file each startup).
-if os.path.exists(COOKIES_PATH) and False:  # TEMP: disabled for diagnostics, see roadmap bug #8
+if os.path.exists(COOKIES_PATH):
     import shutil
     import tempfile
 
