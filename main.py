@@ -17,6 +17,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
+import os
+from datetime import datetime, timezone
 
 app = FastAPI(title="TeloPlay Backend")
 
@@ -28,6 +30,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Render "Secret Files" mounts secret files under /etc/secrets/.
+# If this file exists, we use it for yt-dlp's cookiefile option - this
+# makes requests look like they're coming from a logged-in browser
+# session rather than an anonymous datacenter IP, which significantly
+# reduces (but does not eliminate) YouTube's bot-detection triggers.
+#
+# See roadmap bug #7/#8 for background. If this ever needs replacing:
+#   1. Log into YouTube in a browser with the secondary account
+#   2. Export cookies.txt with the "Get cookies.txt LOCALLY" extension
+#   3. Render dashboard -> teloplay-backend -> Environment -> Secret Files
+#      -> edit /etc/secrets/cookies.txt -> paste new contents -> Save
+#   4. Render redeploys automatically; check GET /health afterwards
+COOKIES_PATH = "/etc/secrets/cookies.txt"
 
 # Reused across requests - yt-dlp caches some info internally which
 # speeds up repeated calls.
@@ -53,12 +69,43 @@ YDL_OPTS = {
     },
 }
 
+# Attach cookies if the secret file is present. Checked once at
+# startup - if you update the cookies file, Render redeploys the
+# whole service anyway, so this re-runs.
+if os.path.exists(COOKIES_PATH):
+    YDL_OPTS["cookiefile"] = COOKIES_PATH
+
+
+def cookies_status() -> dict:
+    """Small helper so /health can report whether cookies are present
+    and how old the file is, without needing to inspect the server."""
+    if not os.path.exists(COOKIES_PATH):
+        return {"cookies_loaded": False}
+
+    modified_ts = os.path.getmtime(COOKIES_PATH)
+    modified_dt = datetime.fromtimestamp(modified_ts, tz=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - modified_dt).days
+
+    return {
+        "cookies_loaded": True,
+        "cookies_updated_at": modified_dt.isoformat(),
+        "cookies_age_days": age_days,
+    }
+
 
 @app.get("/health")
 def health():
     """Used by the keep-alive cron job (cron-job.org) to prevent
-    Render's free tier from spinning the service down."""
-    return {"status": "ok"}
+    Render's free tier from spinning the service down.
+
+    Also reports cookies status - if bot-detection errors (BOT_CHECK)
+    start happening often, check this endpoint first:
+      - cookies_loaded: false          -> secret file missing/misnamed
+      - cookies_age_days: large number -> cookies may have expired,
+                                           time to re-export (see COOKIES_PATH
+                                           comment above for steps)
+    """
+    return {"status": "ok", **cookies_status()}
 
 
 def classify_error(raw_message: str) -> tuple[str, str]:
@@ -74,6 +121,8 @@ def classify_error(raw_message: str) -> tuple[str, str]:
 
     if "sign in to confirm" in msg or "not a bot" in msg:
         return "BOT_CHECK", "YouTube temporarily blocked this request"
+    if "cookies are no longer valid" in msg or "failed to load cookies" in msg:
+        return "COOKIES_EXPIRED", "The server's YouTube session expired"
     if "video unavailable" in msg:
         return "UNAVAILABLE", "This video is unavailable"
     if "private video" in msg:
