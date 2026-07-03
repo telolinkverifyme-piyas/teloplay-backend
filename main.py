@@ -72,8 +72,22 @@ YDL_OPTS = {
 # Attach cookies if the secret file is present. Checked once at
 # startup - if you update the cookies file, Render redeploys the
 # whole service anyway, so this re-runs.
+#
+# IMPORTANT: Render's "Secret Files" are mounted read-only. yt-dlp
+# normally tries to write the cookiejar back to disk when it closes
+# (to persist any session updates), which crashes with "Read-only
+# file system" on Render. cookiesfrombrowser aside, the fix is to
+# copy the cookies into a writable temp location and point yt-dlp
+# there instead - yt-dlp can freely read/write it, and we don't care
+# if it's discarded when the container restarts (we just re-copy the
+# original secret file each startup).
 if os.path.exists(COOKIES_PATH):
-    YDL_OPTS["cookiefile"] = COOKIES_PATH
+    import shutil
+    import tempfile
+
+    _writable_cookies_path = os.path.join(tempfile.gettempdir(), "cookies.txt")
+    shutil.copyfile(COOKIES_PATH, _writable_cookies_path)
+    YDL_OPTS["cookiefile"] = _writable_cookies_path
 
 
 def cookies_status() -> dict:
