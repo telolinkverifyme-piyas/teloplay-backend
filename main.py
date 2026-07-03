@@ -37,6 +37,11 @@ YDL_OPTS = {
     "no_warnings": True,
     "noplaylist": True,
     "extract_flat": False,
+    # A small delay before each request can reduce how often YouTube's
+    # bot-detection triggers (rapid, back-to-back requests from the same
+    # IP are a common trigger). This adds a little latency per stream
+    # resolve but is low-risk and doesn't need any external service.
+    "sleep_interval_requests": 1,
     # Prefer m4a/opus audio-only streams over full video+audio muxes.
     "extractor_args": {
         "youtube": {
