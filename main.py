@@ -86,7 +86,7 @@ YDL_OPTS = {
 # there instead - yt-dlp can freely read/write it, and we don't care
 # if it's discarded when the container restarts (we just re-copy the
 # original secret file each startup).
-if os.path.exists(COOKIES_PATH):
+if os.path.exists(COOKIES_PATH) and False:  # TEMP: disabled for diagnostics, see roadmap bug #8
     import shutil
     import tempfile
 
