@@ -48,7 +48,12 @@ COOKIES_PATH = "/etc/secrets/cookies.txt"
 # Reused across requests - yt-dlp caches some info internally which
 # speeds up repeated calls.
 YDL_OPTS = {
-    "format": "bestaudio/best",
+    # "bestaudio/best" alone can fail with "Requested format is not
+    # available" once cookies are attached - a logged-in session
+    # sometimes gets a different/narrower format list per player_client
+    # than an anonymous one. Broaden the selector so it falls back
+    # through progressively looser options instead of erroring out.
+    "format": "bestaudio/best/bestaudio*/best*",
     "quiet": True,
     "no_warnings": True,
     "noplaylist": True,
