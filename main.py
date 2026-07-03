@@ -246,7 +246,26 @@ def get_stream(video_id: str):
             },
         )
 
+    # info["url"] is only populated when yt-dlp resolved a single,
+    # already-muxed format. With android/ios clients, the chosen
+    # format is very often a separate video+audio pair instead
+    # (info["requested_formats"] = [video_fmt, audio_fmt]), which
+    # leaves info["url"] empty even though a perfectly playable
+    # audio stream was found. Since we only need audio, prefer the
+    # audio-only entry from requested_formats before giving up.
     stream_url = info.get("url")
+    chosen_format = info
+
+    if not stream_url:
+        requested_formats = info.get("requested_formats") or []
+        audio_only = [f for f in requested_formats if f.get("vcodec") in (None, "none") and f.get("url")]
+        any_with_url = [f for f in requested_formats if f.get("url")]
+
+        candidate = (audio_only or any_with_url or [None])[0]
+        if candidate:
+            chosen_format = candidate
+            stream_url = candidate.get("url")
+
     if not stream_url:
         raise HTTPException(
             status_code=502,
@@ -262,7 +281,7 @@ def get_stream(video_id: str):
         "videoId": video_id,
         "title": info.get("title"),
         "url": stream_url,
-        "ext": info.get("ext"),
-        "abr": info.get("abr"),
+        "ext": chosen_format.get("ext"),
+        "abr": chosen_format.get("abr"),
         "duration": info.get("duration"),
     }
