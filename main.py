@@ -83,16 +83,8 @@ YDL_OPTS = {
     # offered. We only serve audio anyway (see get_stream), so a
     # combined format still works, just slightly less bandwidth-efficient.
     "format": "bestaudio/best/bestaudio*/best*/worstaudio/worst",
-    # TEMP DEBUG (bug #9 investigation): verbose=True so Render logs show
-    # whether the bgutil PO token plugin actually loaded - look for a
-    # line like "[debug] [youtube] [pot] PO Token Providers: bgutil:...".
-    # If that line is missing entirely, the pip package isn't being
-    # discovered as a yt-dlp plugin. Revert to quiet=True/no_warnings=True
-    # once this is confirmed working - verbose logs are noisy long-term.
-    "quiet": False,
-    "verbose": True,
+    "quiet": True,
     "no_warnings": True,
-
     "noplaylist": True,
     "extract_flat": False,
     # A small delay before each request can reduce how often YouTube's
@@ -102,29 +94,30 @@ YDL_OPTS = {
     "sleep_interval_requests": 1,
     "extractor_args": {
         "youtube": {
-            # Client order - CHANGED (bug #8 fix):
+            # Client order - CHANGED AGAIN (bug #9 fix, supersedes bug #8):
             #
-            # Once a logged-in cookie session is attached, YouTube now
-            # requires the "web" and "web_safari" clients to bind a GVS
-            # PO Token to the video ID before they'll return real stream
-            # URLs. Without a PO token provider (e.g. bgutil - not yet
-            # implemented, see roadmap Phase 1 bug log), those clients
-            # get their https formats stripped entirely ("YouTube is
-            # forcing SABR streaming for this client") and only image
-            # formats survive. That leaves yt-dlp with nothing to match
-            # against "bestaudio/best/...", so EVERY video fails with
-            # "Requested format is not available" - not just some.
+            # bug #8's fix (android/ios when cookies present) is now
+            # BROKEN by a newer yt-dlp behavior change: yt-dlp now
+            # actively refuses to use android/ios clients at all when
+            # a cookiefile is attached ("Skipping client 'android'
+            # since it does not support cookies" / same for "ios").
+            # With the old ["android", "ios"] list and cookies loaded,
+            # yt-dlp was left with ZERO usable clients - this, not the
+            # datacenter IP alone, was the direct cause of "Failed to
+            # extract any player response" in bug #9's investigation.
             #
-            # This is why cookies previously caused a hard regression
-            # (even dQw4w9WgXcQ started failing): putting "web" first
-            # made every request hit the PO-token-gated path.
+            # Now that bgutil (PO token provider, see BGUTIL_PROVIDER_URL
+            # above) is deployed, we can flip strategy entirely: use
+            # "web" and "web_safari", which DO support cookies, and let
+            # bgutil supply the GVS PO Token they need to avoid the
+            # SABR-forced/image-only response that bug #8 originally
+            # worked around. This is the setup bgutil was built for.
             #
-            # Fix: never use web/web_safari when cookies are present.
-            # android/ios clients don't hit this same GVS PO Token bind
-            # requirement, so they still return real, playable formats
-            # with a cookie session attached.
+            # If cookies are NOT present, fall back to android/ios/web
+            # as before (unauthenticated - no PO token bind requirement
+            # applies to android/ios in that case).
             "player_client": (
-                ["android", "ios"]
+                ["web", "web_safari"]
                 if os.path.exists(COOKIES_PATH)
                 else ["android", "ios", "web"]
             ),
