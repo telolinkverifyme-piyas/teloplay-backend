@@ -90,7 +90,12 @@ YDL_OPTS = {
     # formats that yt-dlp can't match "bestaudio" against. Revert to the
     # stricter selector once resolved.
     "format": "best",
-    "quiet": True,
+    # TEMP DEBUG (bug #9 investigation): verbose=True so Render logs show
+    # the full format list and PO token status per request. Revert to
+    # quiet=True once the format-resolution issue is confirmed fixed -
+    # verbose logs are noisy for long-term production use.
+    "quiet": False,
+    "verbose": True,
     "no_warnings": True,
     "noplaylist": True,
     "extract_flat": False,
