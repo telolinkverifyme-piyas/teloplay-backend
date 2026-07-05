@@ -45,6 +45,33 @@ app.add_middleware(
 #   4. Render redeploys automatically; check GET /health afterwards
 COOKIES_PATH = "/etc/secrets/cookies.txt"
 
+# bgutil PO Token provider (bug #9 fix, deployed 2026-07-05):
+#
+# Even with android/ios clients (see bug #8 fix below), Render's
+# datacenter IP range is flagged by YouTube often enough that
+# extract_info() fails with "Failed to extract any player response"
+# on a meaningful fraction of requests - this is a bot-detection
+# signal at the IP-reputation level, separate from the GVS PO Token
+# format-stripping issue bug #8 fixed.
+#
+# bgutil-ytdlp-pot-provider runs as its own small service (forked to
+# telolinkverifyme-piyas/bgutil-ytdlp-pot-provider, Node-only Docker
+# build) and generates real PO tokens by simulating a browser
+# environment. Passing its URL here lets yt-dlp attach a valid PO
+# token to requests, which significantly improves success rates from
+# a flagged datacenter IP - it does NOT fix IP reputation directly,
+# but tokens are how YouTube's own web/mobile clients prove
+# legitimacy, so a valid token makes our requests look authentic
+# regardless of source IP.
+#
+# IMPORTANT: this provider is on Render's free tier too, so it sleeps
+# after 15 minutes idle just like this service. It needs its OWN
+# keep-alive cron ping (cron-job.org -> its /health equivalent) or
+# the first stream request after idle will be slow/timeout while it
+# cold-starts. Don't forget to set this up alongside the existing
+# keep-alive for THIS service.
+BGUTIL_PROVIDER_URL = "https://bgutil-ytdlp-pot-provider-xrd0.onrender.com"
+
 # Reused across requests - yt-dlp caches some info internally which
 # speeds up repeated calls.
 YDL_OPTS = {
@@ -88,16 +115,16 @@ YDL_OPTS = {
             # android/ios clients don't hit this same GVS PO Token bind
             # requirement, so they still return real, playable formats
             # with a cookie session attached.
-            #
-            # If android/ios ALSO start showing "SABR"/PO token warnings
-            # in the future, that's the signal we finally need the
-            # bgutil PO token provider - cookies alone won't be enough
-            # anymore at that point.
             "player_client": (
                 ["android", "ios"]
                 if os.path.exists(COOKIES_PATH)
                 else ["android", "ios", "web"]
             ),
+            # bug #9 fix: point yt-dlp's bgutil PO token plugin at our
+            # deployed provider instance instead of the default
+            # http://127.0.0.1:4416 (which doesn't exist on Render -
+            # the provider is a separate service with its own URL).
+            "getpot_bgutil_baseurl": [BGUTIL_PROVIDER_URL],
         }
     },
 }
@@ -157,11 +184,18 @@ def health():
                         ever shows "web" first while cookies are
                         loaded, that combination is known to break
                         format resolution on every video)
+      - bgutil_provider_url: should always be set (bug #9). If stream
+                              requests start failing with UNKNOWN/
+                              BOT_CHECK again, check that this URL is
+                              still live (it's a separate free-tier
+                              Render service and can sleep/crash
+                              independently of this one).
     """
     return {
         "status": "ok",
         **cookies_status(),
         "player_client": YDL_OPTS["extractor_args"]["youtube"]["player_client"],
+        "bgutil_provider_url": BGUTIL_PROVIDER_URL,
     }
 
 
