@@ -89,11 +89,10 @@ YDL_OPTS = {
     # still failing and YouTube is serving SABR-only (HLS/DASH manifest)
     # formats that yt-dlp can't match "bestaudio" against. Revert to the
     # stricter selector once resolved.
-    "format": "best",
-    # TEMP DEBUG (bug #9 investigation): verbose=True so Render logs show
-    # the full format list and PO token status per request. Revert to
-    # quiet=True once the format-resolution issue is confirmed fixed -
-    # verbose logs are noisy for long-term production use.
+    "format": "bestaudio/best/bestaudio*/best*/worstaudio/worst",
+    # TEMP DEBUG (bug #9 investigation): kept verbose on for one more
+    # confirmation round after the getpot_bgutil_baseurl key fix below.
+    # Revert to quiet=True once confirmed working.
     "quiet": False,
     "verbose": True,
     "no_warnings": True,
@@ -133,13 +132,18 @@ YDL_OPTS = {
                 if os.path.exists(COOKIES_PATH)
                 else ["android", "ios", "web"]
             ),
-            # bug #9 fix: point yt-dlp's bgutil PO token plugin at our
-            # deployed provider instance instead of the default
-            # http://127.0.0.1:4416 (which doesn't exist on Render -
-            # the provider is a separate service with its own URL).
-            "getpot_bgutil_baseurl": [BGUTIL_PROVIDER_URL],
+            # bug #9 fix (v2 - key name correction): yt-dlp 2026.07.04
+            # deprecated "getpot_bgutil_baseurl" in favor of a dedicated
+            # provider-plugin arg key. Using the old key silently failed
+            # to reach our bgutil provider at all ("Unknown error reaching
+            # GET /ping"), so no PO token was ever generated - which is
+            # why web/web_safari kept getting SABR-forced to image-only
+            # formats despite the provider being deployed and healthy.
         }
     },
+}
+YDL_OPTS["extractor_args"]["youtubepot-bgutilhttp"] = {
+    "base_url": [BGUTIL_PROVIDER_URL],
 }
 
 # Attach cookies if the secret file is present. Checked once at
