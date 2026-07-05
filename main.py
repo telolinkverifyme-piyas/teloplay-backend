@@ -82,7 +82,14 @@ YDL_OPTS = {
     # whatever single format yt-dlp finds if nothing audio-only is
     # offered. We only serve audio anyway (see get_stream), so a
     # combined format still works, just slightly less bandwidth-efficient.
-    "format": "bestaudio/best/bestaudio*/best*/worstaudio/worst",
+    # TEMP DEBUG (bug #9 continued): relaxed to "best" alone so we can
+    # see in Render logs what formats yt-dlp is actually finding with
+    # web/web_safari + bgutil. If "Requested format is not available"
+    # persists even with this permissive selector, PO token binding is
+    # still failing and YouTube is serving SABR-only (HLS/DASH manifest)
+    # formats that yt-dlp can't match "bestaudio" against. Revert to the
+    # stricter selector once resolved.
+    "format": "best",
     "quiet": True,
     "no_warnings": True,
     "noplaylist": True,
