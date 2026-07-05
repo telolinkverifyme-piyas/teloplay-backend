@@ -83,8 +83,16 @@ YDL_OPTS = {
     # offered. We only serve audio anyway (see get_stream), so a
     # combined format still works, just slightly less bandwidth-efficient.
     "format": "bestaudio/best/bestaudio*/best*/worstaudio/worst",
-    "quiet": True,
+    # TEMP DEBUG (bug #9 investigation): verbose=True so Render logs show
+    # whether the bgutil PO token plugin actually loaded - look for a
+    # line like "[debug] [youtube] [pot] PO Token Providers: bgutil:...".
+    # If that line is missing entirely, the pip package isn't being
+    # discovered as a yt-dlp plugin. Revert to quiet=True/no_warnings=True
+    # once this is confirmed working - verbose logs are noisy long-term.
+    "quiet": False,
+    "verbose": True,
     "no_warnings": True,
+
     "noplaylist": True,
     "extract_flat": False,
     # A small delay before each request can reduce how often YouTube's
