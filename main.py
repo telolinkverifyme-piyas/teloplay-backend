@@ -63,6 +63,58 @@ def health():
     }
 
 
+@app.get("/debug-pot")
+def debug_pot():
+    """
+    Temporary diagnostic endpoint. Runs yt-dlp with verbose logging and
+    returns the captured debug lines so we can confirm whether the
+    bgutil PO token plugin is actually being discovered/loaded by yt-dlp,
+    and whether it's successfully reaching the remote pot-provider.
+    Remove this route once the PO token setup is confirmed working -
+    it's not meant to stay in production.
+    """
+    log_lines = []
+
+    class CaptureLogger:
+        def debug(self, msg):
+            log_lines.append(f"DEBUG: {msg}")
+
+        def warning(self, msg):
+            log_lines.append(f"WARNING: {msg}")
+
+        def error(self, msg):
+            log_lines.append(f"ERROR: {msg}")
+
+    debug_opts = dict(YDL_OPTS)
+    debug_opts["verbose"] = True
+    debug_opts["logger"] = CaptureLogger()
+    debug_opts["quiet"] = False
+    debug_opts["no_warnings"] = False
+
+    # A known, cheap video id just to trigger extractor init / plugin
+    # discovery logging - we don't care about the actual stream result here.
+    test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+    extraction_error = None
+    try:
+        with yt_dlp.YoutubeDL(debug_opts) as ydl:
+            ydl.extract_info(test_url, download=False, process=False)
+    except Exception as e:
+        extraction_error = str(e)
+
+    pot_related_lines = [
+        line for line in log_lines
+        if "pot" in line.lower() or "bgutil" in line.lower()
+    ]
+
+    return {
+        "pot_related_debug_lines": pot_related_lines,
+        "all_debug_lines_count": len(log_lines),
+        "extraction_error": extraction_error,
+        "pot_provider_base_url_configured": POT_PROVIDER_BASE_URL,
+    }
+
+
 @app.get("/stream/{video_id}")
 def get_stream(video_id: str):
     url = f"https://www.youtube.com/watch?v={video_id}"
