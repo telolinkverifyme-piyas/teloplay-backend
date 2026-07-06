@@ -4,6 +4,7 @@ import shutil
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 import yt_dlp
 
@@ -15,6 +16,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# /resolve-info response e pura player JS (~2.5MB raw text) thake -
+# GZip diye eta compress kore pathano hoy, transfer size onek kome jay
+# (JS text shadharonoto 70-80% compress hoy). Kono extra kaj lage na -
+# FastAPI/Starlette nijei minimum_size er beshi response gulo gzip kore.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 SECRET_COOKIES_PATH = "/etc/secrets/cookies.txt"
 WRITABLE_COOKIES_PATH = "/tmp/cookies.txt"
