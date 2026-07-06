@@ -79,12 +79,19 @@ def health():
 
 
 @app.get("/debug-pot")
-def debug_pot():
+def debug_pot(video_id: str = "dQw4w9WgXcQ"):
     """
     Temporary diagnostic endpoint. Runs yt-dlp with verbose logging and
     returns the captured debug lines so we can confirm whether the
     bgutil PO token plugin is actually being discovered/loaded by yt-dlp,
     and whether it's successfully reaching the remote pot-provider.
+
+    Pass ?video_id=XXXXXXXXXXX to test against a specific (e.g. real
+    failing) video instead of the default easy-tier test video - this
+    matters because bot-detection tier can differ a LOT between videos
+    (well-known/old videos vs newer/label-owned ones), so a pass on the
+    default video does NOT confirm the setup works for real songs.
+
     Remove this route once the PO token setup is confirmed working -
     it's not meant to stay in production.
     """
@@ -106,7 +113,7 @@ def debug_pot():
     debug_opts["quiet"] = False
     debug_opts["no_warnings"] = False
 
-    test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    test_url = f"https://www.youtube.com/watch?v={video_id}"
 
     extraction_error = None
     try:
@@ -121,6 +128,7 @@ def debug_pot():
     ]
 
     return {
+        "video_id_tested": video_id,
         "pot_related_debug_lines": pot_related_lines,
         "all_debug_lines_count": len(log_lines),
         "extraction_error": extraction_error,
