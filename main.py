@@ -98,7 +98,10 @@ def debug_pot():
     extraction_error = None
     try:
         with yt_dlp.YoutubeDL(debug_opts) as ydl:
-            ydl.extract_info(test_url, download=False, process=False)
+            # process=True (default) so token generation actually completes
+            # and we can see the success/failure line that follows
+            # "Generating a gvs PO Token..." in the logs.
+            ydl.extract_info(test_url, download=False)
     except Exception as e:
         extraction_error = str(e)
 
