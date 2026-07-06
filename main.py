@@ -16,6 +16,13 @@ app.add_middleware(
 SECRET_COOKIES_PATH = "/etc/secrets/cookies.txt"
 WRITABLE_COOKIES_PATH = "/tmp/cookies.txt"
 
+
+# bgutil-ytdlp-pot-provider আলাদা Render service হিসেবে deploy করা আছে।
+# এটা PO Token (Proof of Origin) সাপ্লাই করে yt-dlp কে - কড়া bot-detection
+# tier এর ভিডিওগুলোতে (নতুন/label গান) শুধু cookies যথেষ্ট না, PO token
+# ছাড়া YouTube "Sign in to confirm you're not a bot" দিয়ে ব্লক করে দেয়।
+POT_PROVIDER_BASE_URL = "https://bgutil-ytdlp-pot-provider-xrd0.onrender.com"
+
 YDL_OPTS = {
     "format": "bestaudio/best",
     "quiet": True,
@@ -25,7 +32,10 @@ YDL_OPTS = {
     "extractor_args": {
         "youtube": {
             "player_client": ["android", "ios", "web"],
-        }
+        },
+        "youtubepot-bgutilhttp": {
+            "base_url": [POT_PROVIDER_BASE_URL],
+        },
     },
 }
 
